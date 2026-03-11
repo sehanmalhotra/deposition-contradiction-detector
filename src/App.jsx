@@ -259,50 +259,17 @@ function ContradictionCard({ result }) {
   );
 }
 
-// ─── LLM extraction ───────────────────────────────────────────────────────────
+// ─── LLM extraction (via local backend) ──────────────────────────────────────
 
-async function extractCandidates(apiKey) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1200,
-      messages: [
-        {
-          role: "user",
-          content: `You are a legal assistant. Find candidate contradictions between these two depositions from the same witness.
-
-Return ONLY a valid JSON array — no prose, no markdown fences. Each item must have exactly these keys:
-- "march_excerpt": the relevant exact quote from Transcript 1
-- "september_excerpt": the relevant exact quote from Transcript 2
-- "topic": a single lowercase word describing the subject (e.g. "alibi", "timing", "location", "identity", "vehicle")
-
-Do NOT classify type. Do NOT assign severity or confidence. Extract only.
-
-Transcript 1 (March 2023):
-${TRANSCRIPT_MARCH}
-
-Transcript 2 (September 2023):
-${TRANSCRIPT_SEPTEMBER}`,
-        },
-      ],
-    }),
-  });
+async function extractCandidates() {
+  const res = await fetch("/api/extract", { method: "POST" });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`API error ${res.status}: ${body}`);
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error ?? `Server error ${res.status}`);
   }
 
-  const data = await res.json();
-  const raw = data.content[0].text.replace(/```json|```/g, "").trim();
-  return JSON.parse(raw);
+  return res.json();
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -313,20 +280,12 @@ export default function App() {
   const [error, setError] = useState(null);
 
   async function analyze() {
-    const apiKey = import.meta.env.VITE_ANTHROPIC_KEY;
-    if (!apiKey) {
-      setError(
-        "Missing API key. Copy .env.example to .env and set VITE_ANTHROPIC_KEY."
-      );
-      return;
-    }
-
     setLoading(true);
     setError(null);
     setResults(null);
 
     try {
-      const candidates = await extractCandidates(apiKey);
+      const candidates = await extractCandidates();
       const scored = scoreContradictions(candidates);
       setResults(scored);
     } catch (e) {
